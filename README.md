@@ -1,1 +1,1 @@
-personal stable diffusion project
+llm + flux
