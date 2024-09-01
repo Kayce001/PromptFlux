@@ -1,0 +1,4 @@
+requests
+cryptography
+Pillow
+gradio
