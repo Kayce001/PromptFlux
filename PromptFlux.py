@@ -33,7 +33,7 @@ def refine_prompt(input_prompt):
     encrypted_llm_url = "gAAAAABmjKwbgAOc1v48A1v0mDAGpYzOyZu4fJm2u4vIDgMHHAHuEWz521Q2vnlToWO5dpc781hkwomCiW0d16tkJXxp-32qIr77E3jwqYw-NouLxiuXl_KwBkLLNgJ97xPvQN7N52N1"
     llm_url = cipher_suite.decrypt(encrypted_llm_url.encode()).decode()
     llm_payload = {
-        "model": "Qwen/Qwen2-72B-Instruct",
+        "model": "Qwen/Qwen2-72B-Instruct",    #换成你想用的大模型
         "messages": [
             {
                 "role": "user",
@@ -58,7 +58,7 @@ def refine_prompt(input_prompt):
         return f"JSON Decode Error: {e}"
     
 def generate_image(prompt):
-    url = "https://api.siliconflow.cn/v1/black-forest-labs/FLUX.1-schnell/text-to-image"  # 使用新的 URL
+    url = "your flux api"  # 换成你想要的文生图模型api接口
     payload = {
         "prompt": prompt,
         "image_size": "1024x1024",
@@ -96,14 +96,14 @@ def generate_image(prompt):
 # 生成图像
 def integrated_generate_image(input_prompt):
     # 先优化提示词
-    negative_prompt = (
+  """  negative_prompt = (
         "Negative prompt: Blurry, low quality, poor detail, unrealistic proportions, "
         "distortion, deformation, out of focus, anatomical errors, unnatural lighting, "
         "over saturation, grainy, pixelated, messy background, lack of detail, dull colors, "
         "flat, cartoony, overexposed, underexposed, poor hand details, twisted fingers, "
         "unnatural hand positioning, anatomical errors on hands, inharmonious hand shadows, "
         "blurred hand lines, disproportionate hand size, lacking texture on hand skin, incorrect number of fingers,incorrect drawn thumb.Please strictly follow the negative prompt instructions, ensuring that none of the mentioned elements are present."
-    )
+    )"""
 
     # 先优化提示词
     refined_prompt = refine_prompt(input_prompt) 
