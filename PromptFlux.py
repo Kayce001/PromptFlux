@@ -1,130 +1,153 @@
 import requests
-from cryptography.fernet import Fernet
 from PIL import Image
 from io import BytesIO
-import re
 import gradio as gr
 import time
+import logging
 
-# 读取加密密钥
-key_file_path = "secret.key"  # 确保路径正确
-with open(key_file_path, "rb") as key_file:
-    key = key_file.read()
-cipher_suite = Fernet(key)
+# 设置日志记录
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# 解密API密钥
-encrypted_api_key = "gAAAAABmjKwb8aqffrV-moNQ6BEJEknwaY2301n5Nu0cNRFFgB98T0Z6shkHFA_2DM0PfiqpTcX5keE4WR0QEz7s3vC9JIrTVj53qdQibrxQlu7LbKPq9lzSM-ykL5V_gWQAVPXh9mlKYNclaQzAKct_xdGstIaf6Q=="
+# 直接在代码中赋值 API 密钥和 URL
+api_key = "your-api-key"  # 你的 API 密钥
+llm_url = "https://api.siliconflow.cn/v1/chat/completions"  # 语言模型 API 地址
+image_gen_url = "https://api.siliconflow.cn/v1/images/generations"  # 图像生成 API 地址
 
-try:
-    api_key = cipher_suite.decrypt(encrypted_api_key.encode()).decode()
-except Exception as e:
-    raise ValueError(f"Decryption failed: {e}")
-
-# 模板字符串，用于激发用户提供详尽的描述
+# 提示词生成模板
 template = """
 Act as a stable diffusion Prompt Generator:
-"I hope you can serve as a prompt generator, creating high-quality prompts based on user inputs for artificial intelligence programs. Your job is to provide detailed and creative descriptions that will inspire unique and interesting images from the AI. Keep in mind that the AI is capable of understanding a wide range of language and can interpret abstract concepts, so feel free to be as imaginative and descriptive as possible,Here is an example prompt: "A field of wildflowers stretches out as far as the eye can see, each one a different color and shape. In the distance, a massive tree towers over the landscape, its branches reaching up to the sky like tentacles.".
-"
-Please refine the following image generation prompt in english:
-""" 
+"I hope you can serve as a prompt generator, creating high-quality prompts based on user inputs for artificial intelligence programs. Your job is to provide detailed and creative descriptions that will inspire unique and interesting images from the AI. Keep in mind that the AI is capable of understanding a wide range of language and can interpret abstract concepts, so feel free to be as imaginative and descriptive as possible. Here is an example prompt: 'A field of wildflowers stretches out as far as the eye can see, each one a different color and shape. In the distance, a massive tree towers over the landscape, its branches reaching up to the sky like tentacles.'"
+Please refine the following image generation prompt in English:
+"""
 
-# 使用LLM优化提示词
-def refine_prompt(input_prompt):
-    encrypted_llm_url = "gAAAAABmjKwbgAOc1v48A1v0mDAGpYzOyZu4fJm2u4vIDgMHHAHuEWz521Q2vnlToWO5dpc781hkwomCiW0d16tkJXxp-32qIr77E3jwqYw-NouLxiuXl_KwBkLLNgJ97xPvQN7N52N1"
-    llm_url = cipher_suite.decrypt(encrypted_llm_url.encode()).decode()
+def refine_prompt(user_prompt):
+    """
+    使用语言模型优化用户输入的提示词。
+    """
     llm_payload = {
-        "model": "Qwen/Qwen2-72B-Instruct",    #换成你想用的大模型
+        "model": "Qwen/Qwen2.5-72B-Instruct-128K",  # 更新后的模型名称
         "messages": [
             {
                 "role": "user",
-                "content": f"{template} {input_prompt}"
+                "content": f"{template} {user_prompt}"
             }
-        ]
+        ],
+        "stream": False,
+        "max_tokens": 512,
+        "stop": ["null"],
+        "temperature": 0.7,
+        "top_p": 0.7,
+        "top_k": 50,
+        "frequency_penalty": 0.5,
+        "n": 1,
+        "response_format": {"type": "text"}
     }
     llm_headers = {
-        "Authorization": f"Bearer {api_key}",  # 确保从安全位置获取api_key
-        "Content-Type": "application/json",
-        "Accept": "application/json"
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
     
     try:
-        response = requests.post(llm_url, json=llm_payload, headers=llm_headers)
-        response.raise_for_status()  # 会抛出HTTP错误状态码的异常
-        refined_prompt = response.json().get('choices')[0]['message']['content'] if response.json().get('choices') else "No refined prompt returned."
+        logging.debug(f"发送给语言模型的负载: {llm_payload}")
+        response = requests.request("POST", llm_url, json=llm_payload, headers=llm_headers, timeout=30)
+        response.raise_for_status()
+        response_json = response.json()
+        logging.debug(f"Refine Prompt Response: {response_json}")
+        
+        # 根据实际响应格式调整解析逻辑
+        if "choices" in response_json and len(response_json["choices"]) > 0:
+            refined_prompt = response_json["choices"][0].get("message", {}).get("content", "No content in message.")
+        else:
+            refined_prompt = "No refined prompt returned."
         return refined_prompt
     except requests.exceptions.RequestException as e:
+        logging.error(f"HTTP Request failed: {e}")
         return f"HTTP Request failed: {e}"
-    except ValueError as e:
-        return f"JSON Decode Error: {e}"
-    
-def generate_image(prompt):
-    url = "your flux api"  # 换成你想要的文生图模型api接口
+    except (ValueError, KeyError, IndexError) as e:
+        logging.error(f"JSON Decode Error or Unexpected Response Format: {e}")
+        return f"JSON Decode Error or Unexpected Response Format: {e}"
+
+def generate_image(prompt, negative_prompt):
+    """
+    使用优化后的提示词生成图像。
+    """
     payload = {
+        "model": "black-forest-labs/FLUX.1-dev",  # 请根据实际情况确认模型名称
         "prompt": prompt,
+        "negative_prompt": negative_prompt,  # 移除 "Negative prompt: " 前缀
         "image_size": "1024x1024",
         "batch_size": 1,
-        "num_inference_steps": 25,
-        "guidance_scale": 4.5
+        "seed": 1234567890,  # 使用较小的种子值，确保在API允许范围内
+        "num_inference_steps": 50,  # 增加步数以提高图像质量
+        "guidance_scale": 7.5,
+        "prompt_enhancement": False
     }
     headers = {
-        "accept": "application/json",
-        "content-type": "application/json",
-        "authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
 
     max_retries = 5
     for i in range(max_retries):
         try:
-            response = requests.post(url, json=payload, headers=headers)
-            response.raise_for_status()  # Raise an exception for HTTP errors
-            match = re.search(r'"url":"(https://[^"]+)"', response.text)
-            if match:
-                image_url = match.group(1)
-                # 下载并返回图像
-                image_response = requests.get(image_url)
-                image_response.raise_for_status()
-                image = Image.open(BytesIO(image_response.content))
-                return image
+            logging.debug(f"发送给图像生成API的负载: {payload}")
+            response = requests.request("POST", image_gen_url, json=payload, headers=headers, timeout=60)
+            response.raise_for_status()
+            response_json = response.json()
+            logging.debug(f"Generate Image Response: {response_json}")
+
+            if "data" in response_json and len(response_json["data"]) > 0:
+                image_url = response_json["data"][0].get("url")
+                logging.debug(f"Image URL: {image_url}")
+                if image_url:
+                    image_response = requests.get(image_url, timeout=60)
+                    image_response.raise_for_status()
+                    image = Image.open(BytesIO(image_response.content))
+                    return image
+                else:
+                    return "No image URL found in the response"
             else:
-                return "No image URL found in the response"
+                return "No image data found in the response"
         except requests.exceptions.RequestException as e:
-            print(f"Attempt {i+1} failed: {e}")
-            time.sleep(2 ** i)  # Exponential backoff
+            logging.error(f"Attempt {i+1} failed: {e}")
+            time.sleep(2 ** i)  # 指数退避
     return "Failed to generate image after multiple attempts"
 
+def integrated_generate_image(user_prompt):
+    """
+    集成优化提示词和生成图像的功能。
+    """
+    # 定义负面提示
+    negative_prompt = (
+        "Blurry, low quality, poor detail, unrealistic proportions, distortion, deformation, out of focus, anatomical errors, unnatural lighting, "
+        "over saturation, grainy, pixelated, messy background, lack of detail, dull colors, flat, cartoony, overexposed, underexposed, "
+        "poor hand details, twisted fingers, unnatural hand positioning, anatomical errors on hands, inharmonious hand shadows, "
+        "blurred hand lines, disproportionate hand size, lacking texture on hand skin, incorrect number of fingers, incorrect drawn thumb."
+    )
 
-# 生成图像
-def integrated_generate_image(input_prompt):
     # 先优化提示词
-  """  negative_prompt = (
-        "Negative prompt: Blurry, low quality, poor detail, unrealistic proportions, "
-        "distortion, deformation, out of focus, anatomical errors, unnatural lighting, "
-        "over saturation, grainy, pixelated, messy background, lack of detail, dull colors, "
-        "flat, cartoony, overexposed, underexposed, poor hand details, twisted fingers, "
-        "unnatural hand positioning, anatomical errors on hands, inharmonious hand shadows, "
-        "blurred hand lines, disproportionate hand size, lacking texture on hand skin, incorrect number of fingers,incorrect drawn thumb.Please strictly follow the negative prompt instructions, ensuring that none of the mentioned elements are present."
-    )"""
-
-    # 先优化提示词
-    refined_prompt = refine_prompt(input_prompt) 
-    print("Optimized Prompt:", refined_prompt)
-    if "Error" in refined_prompt:
-        return refined_prompt  # 如果有错误，返回错误信息
+    refined_prompt = refine_prompt(user_prompt) 
+    logging.debug(f"Optimized Prompt: {refined_prompt}")
+    if "Error" in refined_prompt or "No refined prompt" in refined_prompt:
+        return refined_prompt  # 返回错误信息
 
     # 使用优化后的提示词生成图像
-    return generate_image(refined_prompt)
+    image = generate_image(refined_prompt, negative_prompt)
+    if isinstance(image, Image.Image):
+        return image
+    else:
+        return image  # 返回错误信息
 
-# 禁用分析
-gr.Interface.analytics_enabled = False
-
-# 使用 Gradio 创建前端界面
+# 创建 Gradio 界面
 iface = gr.Interface(
-    fn=integrated_generate_image,  # 更新为新的集成函数
-    inputs="text",
-    outputs="image",
-    title="Image Generation",
-    description="输入描述，生成图像"
+    fn=integrated_generate_image,
+    inputs=gr.Textbox(lines=2, placeholder="请输入图像描述..."),
+    outputs=gr.Image(type="pil"),
+    title="图像生成器",
+    description="输入描述，生成图像",
+    analytics_enabled=False  # 禁用分析
 )
 
 # 运行 Gradio 应用
-iface.launch(server_name="0.0.0.0", server_port=7860)
+if __name__ == "__main__":
+    iface.launch(server_name="0.0.0.0", server_port=7860)
